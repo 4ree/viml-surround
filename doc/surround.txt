@@ -1,0 +1,93 @@
+*surround.txt*  Mini Vim-Surround — add, delete, and visual surround
+
+MINI VIM-SURROUND                                              *surround*
+
+A lightweight surround plugin providing three operations: adding surrounds
+with a motion, deleting surrounding pairs, and adding surrounds in visual
+mode.
+
+==============================================================================
+MAPPINGS                                                *surround-mappings*
+
+                                                        *ys*
+ys{motion}{char}
+                Add surrounding pair around the text covered by {motion}.
+                Works with any motion or text object.
+
+                Examples:
+                  `ysiw(`  — surround inner word with ()
+                  `ys$"`   — surround from cursor to EOL with ""
+                  `ysap}`  — surround a paragraph with { }
+
+                                                        *yss*
+yss{char}       Add surrounding pair around the entire current line
+                (excluding leading/trailing whitespace is determined
+                by the motion `_`).
+
+                Examples:
+                  `yss(`   — surround current line with ()
+                  `yss"`   — surround current line with ""
+
+                                                        *ds*
+ds{char}        Delete the surrounding pair identified by {char}.
+                Works with (), [], {}, <>, quotes, backticks, and
+                tags (use 't' for HTML/XML tags).
+
+                Examples:
+                  `ds(`   — delete surrounding parentheses
+                  `ds"`   — delete surrounding double quotes
+                  `dst`   — delete surrounding HTML tag
+
+                                                        *gs*
+gs{char}        In visual mode, surround the selection with the pair
+                identified by {char}. In linewise visual mode (|V|),
+                the open/close strings are placed on separate lines.
+
+                Mnemonic: "go surround"
+
+                Use 't' to be prompted for a tag name.
+
+                Examples:
+                  Select a word, press `gs(` — wraps with ()
+                  Select a word, press `gst` — prompted for tag name
+
+==============================================================================
+SURROUND PAIRS                                          *surround-pairs*
+
+Char    Open    Close   Notes ~
+(       (       )       no inner spaces
+)       ·(·     ·)·     with inner spaces
+[       [       ]       no inner spaces
+]       ·[·     ·]·     with inner spaces
+{       {       }       no inner spaces
+}       ·{·     ·}·     with inner spaces
+<       <       >       no inner spaces
+>       ·<·     ·>·     with inner spaces
+'       '       '
+"       "       "
+`       `       `
+t       <tag>   </tag>  prompted for tag name
+
+Any other character will use itself as both the opening and closing
+delimiter (e.g., `ds/` deletes surrounding `/` characters).
+
+==============================================================================
+OPTIONS                                                 *surround-options*
+
+                                                *g:loaded_surround*
+Set `g:loaded_surround` before this plugin loads to prevent it from
+defining default mappings. You can then set your own using the Lua API:
+>lua
+    vim.g.loaded_surround = true
+    local surround = require("surround")
+    vim.keymap.set("n", "ds", surround.delete_surround)
+    vim.keymap.set("n", "ys", surround.add_surround, { expr = true })
+    vim.keymap.set("n", "yss", surround.add_surround_line, { expr = true })
+    vim.keymap.set("x", "gs", function()
+      vim.api.nvim_feedkeys(
+        vim.api.nvim_replace_termcodes("<Esc>", true, false, true), "x", false)
+      surround.visual_surround()
+    end)
+<
+
+ vim:tw=78:ts=8:ft=help:norl:
