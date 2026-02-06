@@ -44,13 +44,13 @@ function M.find_surrounding(char)
   local save = vim.fn.getpos(".")
 
   if char == "t" then
-    local open_pos = vim.fn.searchpairpos("<\\w", "", ">", "bnW")
+    local open_pos = vim.fn.searchpairpos("<\\w", "", ">", "bcnW")
     if open_pos[1] == 0 then return nil end
     vim.fn.setpos(".", { 0, open_pos[1], open_pos[2], 0 })
     local open_end = vim.fn.searchpos(">", "nW")
     vim.fn.setpos(".", save)
 
-    local close_start = vim.fn.searchpairpos("<\\w", "", "</\\w\\+>", "nW")
+    local close_start = vim.fn.searchpairpos("<\\w", "", "</\\w\\+>", "cnW")
     if close_start[1] == 0 then return nil end
     vim.fn.setpos(".", { 0, close_start[1], close_start[2], 0 })
     local close_end = vim.fn.searchpos(">", "nW")
@@ -65,12 +65,17 @@ function M.find_surrounding(char)
   local open_pos, close_pos
   local sp = search_pairs[char]
   if sp then
-    open_pos  = vim.fn.searchpairpos(sp[1], "", sp[2], "bnW")
-    close_pos = vim.fn.searchpairpos(sp[1], "", sp[2], "nW")
+    open_pos  = vim.fn.searchpairpos(sp[1], "", sp[2], "bcnW")
+    close_pos = vim.fn.searchpairpos(sp[1], "", sp[2], "cnW")
   else
     local escaped = "\\V" .. vim.fn.escape(char, "\\")
-    open_pos  = vim.fn.searchpos(escaped, "bnW")
+    open_pos  = vim.fn.searchpos(escaped, "bcnW")
     close_pos = vim.fn.searchpos(escaped, "nW")
+    -- Cursor may be on the closing delimiter; retry with swapped flags
+    if close_pos[1] == 0 and open_pos[1] ~= 0 then
+      open_pos  = vim.fn.searchpos(escaped, "bnW")
+      close_pos = vim.fn.searchpos(escaped, "cnW")
+    end
   end
 
   vim.fn.setpos(".", save)
