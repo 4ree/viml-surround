@@ -11,13 +11,132 @@ local surround_pairs = {
   ["`"] = { "`", "`" },
 }
 
--- Search patterns for finding surrounding pairs (used by searchpairpos)
-local search_pairs = {
-  ["("] = { "(",  ")" },  [")"] = { "(",  ")" },
-  ["["] = { "\\[", "\\]" }, ["]"] = { "\\[", "\\]" },
-  ["{"] = { "[{]", "[}]" }, ["}"] = { "[{]", "[}]" },
-  ["<"] = { "<",  ">" },  [">"] = { "<",  ">" },
+-- Bracket open/close mapping
+local bracket_pair = {
+  ["("] = { "(", ")" },  [")"] = { "(", ")" },
+  ["["] = { "[", "]" },  ["]"] = { "[", "]" },
+  ["{"] = { "{", "}" },  ["}"] = { "{", "}" },
+  ["<"] = { "<", ">" },  [">"] = { "<", ">" },
 }
+
+local function find_bracket(open, close)
+  local cur = vim.api.nvim_win_get_cursor(0)
+  local crow, ccol = cur[1], cur[2] + 1
+  local total = vim.api.nvim_buf_line_count(0)
+
+  -- backward: find unmatched open
+  local depth, orow, ocol = 0
+  local found = false
+  for lnum = crow, 1, -1 do
+    local line = vim.fn.getline(lnum)
+    local ec = lnum == crow and ccol or #line
+    for c = ec, 1, -1 do
+      local ch = line:sub(c, c)
+      if ch == close and not (lnum == crow and c == ccol) then
+        depth = depth + 1
+      elseif ch == open then
+        if depth == 0 then
+          orow, ocol = lnum, c; found = true; break
+        end
+        depth = depth - 1
+      end
+    end
+    if found then break end
+  end
+  if not found then return nil end
+
+  -- forward: find matching close from open+1
+  depth = 0; found = false
+  local crow2, ccol2
+  for lnum = orow, total do
+    local line = vim.fn.getline(lnum)
+    local sc = lnum == orow and ocol + 1 or 1
+    for c = sc, #line do
+      local ch = line:sub(c, c)
+      if ch == open then depth = depth + 1
+      elseif ch == close then
+        if depth == 0 then
+          crow2, ccol2 = lnum, c; found = true; break
+        end
+        depth = depth - 1
+      end
+    end
+    if found then break end
+  end
+  if not found then return nil end
+
+  return {
+    open  = { orow, ocol, orow, ocol },
+    close = { crow2, ccol2, crow2, ccol2 },
+  }
+end
+
+local function find_quote(char)
+  local cur = vim.api.nvim_win_get_cursor(0)
+  local row, col = cur[1], cur[2] + 1
+  local line = vim.fn.getline(row)
+
+  local pos = {}
+  for i = 1, #line do
+    if line:sub(i, i) == char then pos[#pos + 1] = i end
+  end
+
+  for i = 1, #pos - 1, 2 do
+    if pos[i] <= col and pos[i + 1] >= col then
+      return {
+        open  = { row, pos[i],     row, pos[i] },
+        close = { row, pos[i + 1], row, pos[i + 1] },
+      }
+    end
+  end
+  return nil
+end
+
+local function find_tag()
+  local save = vim.fn.getpos(".")
+  local srow, scol = save[2], save[3]
+
+  vim.fn.setpos(".", save)
+  while true do
+    local op = vim.fn.searchpos("<\\w", "bW")
+    if op[1] == 0 then vim.fn.setpos(".", save); return nil end
+
+    local line = vim.fn.getline(op[1])
+    local tag = line:match("<(%w[%w%-]*)", op[2])
+    if tag then
+      local oe = vim.fn.searchpos(">", "nW")
+      if oe[1] ~= 0 then
+        local opat = "\\V<" .. tag .. "\\m\\>"
+        local cpat = "\\V</" .. tag .. ">"
+        local cs = vim.fn.searchpairpos(opat, "", cpat, "nW")
+        if cs[1] ~= 0 then
+          vim.fn.setpos(".", { 0, cs[1], cs[2], 0 })
+          local ce = vim.fn.searchpos(">", "nW")
+          if ce[1] ~= 0 then
+            local after  = srow > op[1] or (srow == op[1] and scol >= op[2])
+            local before = srow < ce[1] or (srow == ce[1] and scol <= ce[2])
+            if after and before then
+              vim.fn.setpos(".", save)
+              return {
+                open  = { op[1], op[2], oe[1], oe[2] },
+                close = { cs[1], cs[2], ce[1], ce[2] },
+              }
+            end
+          end
+        end
+      end
+    end
+
+    -- move before this match so next iteration searches further back
+    if op[2] > 1 then
+      vim.fn.setpos(".", { 0, op[1], op[2] - 1, 0 })
+    elseif op[1] > 1 then
+      vim.fn.setpos(".", { 0, op[1] - 1, #vim.fn.getline(op[1] - 1), 0 })
+    else
+      vim.fn.setpos(".", save); return nil
+    end
+  end
+end
 
 local function get_char()
   local ok, nr = pcall(vim.fn.getchar)
@@ -41,50 +160,10 @@ function M.get_pair(char)
 end
 
 function M.find_surrounding(char)
-  local save = vim.fn.getpos(".")
-
-  if char == "t" then
-    local open_pos = vim.fn.searchpairpos("<\\w", "", ">", "bcnW")
-    if open_pos[1] == 0 then return nil end
-    vim.fn.setpos(".", { 0, open_pos[1], open_pos[2], 0 })
-    local open_end = vim.fn.searchpos(">", "nW")
-    vim.fn.setpos(".", save)
-
-    local close_start = vim.fn.searchpairpos("<\\w", "", "</\\w\\+>", "cnW")
-    if close_start[1] == 0 then return nil end
-    vim.fn.setpos(".", { 0, close_start[1], close_start[2], 0 })
-    local close_end = vim.fn.searchpos(">", "nW")
-    vim.fn.setpos(".", save)
-
-    return {
-      open  = { open_pos[1], open_pos[2], open_end[1], open_end[2] },
-      close = { close_start[1], close_start[2], close_end[1], close_end[2] },
-    }
-  end
-
-  local open_pos, close_pos
-  local sp = search_pairs[char]
-  if sp then
-    open_pos  = vim.fn.searchpairpos(sp[1], "", sp[2], "bcnW")
-    close_pos = vim.fn.searchpairpos(sp[1], "", sp[2], "cnW")
-  else
-    local escaped = "\\V" .. vim.fn.escape(char, "\\")
-    open_pos  = vim.fn.searchpos(escaped, "bcnW")
-    close_pos = vim.fn.searchpos(escaped, "nW")
-    -- Cursor may be on the closing delimiter; retry with swapped flags
-    if close_pos[1] == 0 and open_pos[1] ~= 0 then
-      open_pos  = vim.fn.searchpos(escaped, "bnW")
-      close_pos = vim.fn.searchpos(escaped, "cnW")
-    end
-  end
-
-  vim.fn.setpos(".", save)
-  if open_pos[1] == 0 or close_pos[1] == 0 then return nil end
-
-  return {
-    open  = { open_pos[1], open_pos[2], open_pos[1], open_pos[2] },
-    close = { close_pos[1], close_pos[2], close_pos[1], close_pos[2] },
-  }
+  if char == "t" then return find_tag() end
+  local bp = bracket_pair[char]
+  if bp then return find_bracket(bp[1], bp[2]) end
+  return find_quote(char)
 end
 
 function M.delete_surround()
